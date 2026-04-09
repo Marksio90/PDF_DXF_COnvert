@@ -7,7 +7,7 @@ import shutil
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, BackgroundTasks
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, BackgroundTasks
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -155,7 +155,7 @@ def download_dxf(job_id: str, db: Session = Depends(get_db)):
 async def reconvert(
     job_id: str,
     background_tasks: BackgroundTasks,
-    forced_unit: Optional[str] = Form(None),
+    forced_unit: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
     """Re-run conversion with different settings (e.g. forced unit)."""

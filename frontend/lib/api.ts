@@ -64,12 +64,9 @@ export async function deleteJob(id: string): Promise<void> {
 }
 
 export async function reconvertJob(id: string, forcedUnit?: string): Promise<Job> {
-  const form = new FormData();
-  if (forcedUnit) form.append("forced_unit", forcedUnit);
-  const res = await fetch(`${API_BASE}/api/jobs/${id}/reconvert`, {
-    method: "POST",
-    body: form,
-  });
+  const url = new URL(`${API_BASE}/api/jobs/${id}/reconvert`);
+  if (forcedUnit) url.searchParams.set("forced_unit", forcedUnit);
+  const res = await fetch(url.toString(), { method: "POST" });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || `Re-convert failed (${res.status})`);
