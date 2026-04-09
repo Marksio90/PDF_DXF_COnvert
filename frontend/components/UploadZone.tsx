@@ -8,11 +8,8 @@ interface Props {
 }
 
 const UNIT_OPTIONS = [
-  { value: "",          label: "Auto (wykryj ze skali/tekstu)" },
-  { value: "mm",        label: "mm — przelicz pt→mm (standardowe PDF)" },
-  { value: "mm_direct", label: "mm natywne — bez konwersji (CAD PDF z mm)" },
-  { value: "inch",      label: "Cale (inch)" },
-  { value: "cm",        label: "Centymetry (cm)" },
+  { value: "",          label: "Auto (pt→mm, standard)" },
+  { value: "mm_direct", label: "mm natywne — gdy DXF ~2.83× za mały" },
 ];
 
 export default function UploadZone({ onJobCreated }: Props) {

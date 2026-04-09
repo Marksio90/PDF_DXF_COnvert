@@ -11,11 +11,8 @@ interface Props {
 }
 
 const UNIT_OPTIONS = [
-  { value: "",          label: "Auto" },
-  { value: "mm",        label: "mm (pt→mm)" },
-  { value: "mm_direct", label: "mm natywne" },
-  { value: "inch",      label: "inch" },
-  { value: "cm",        label: "cm" },
+  { value: "",          label: "Auto (pt→mm)" },
+  { value: "mm_direct", label: "mm natywne (~2.83× za mały?)" },
 ];
 
 const STATUS_COLORS: Record<string, string> = {
