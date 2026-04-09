@@ -8,10 +8,11 @@ interface Props {
 }
 
 const UNIT_OPTIONS = [
-  { value: "", label: "Auto-detect from PDF" },
-  { value: "mm", label: "Millimeters (mm)" },
-  { value: "inch", label: "Inches (in)" },
-  { value: "cm", label: "Centimeters (cm)" },
+  { value: "",          label: "Auto (wykryj ze skali/tekstu)" },
+  { value: "mm",        label: "mm — przelicz pt→mm (standardowe PDF)" },
+  { value: "mm_direct", label: "mm natywne — bez konwersji (CAD PDF z mm)" },
+  { value: "inch",      label: "Cale (inch)" },
+  { value: "cm",        label: "Centymetry (cm)" },
 ];
 
 export default function UploadZone({ onJobCreated }: Props) {
