@@ -196,59 +196,13 @@ def _is_frame(pts: list[tuple], page_width: float, page_height: float) -> bool:
 def _join_lines(lines: list[dict], tol: float) -> list[dict]:
     """
     Łączy sąsiadujące segmenty w ciągłe łańcuchy (LWPOLYLINE).
-    Algorytm zachłanny end-to-end z wielokrotnym przebiegiem.
+    Algorytm zachłanny end-to-end z wielokrotnym przebiegiem aż do stabilizacji.
     """
     if not lines:
         return []
 
     chains: list[list[tuple]] = [list(s["points"]) for s in lines if len(s["points"]) >= 2]
 
-    changed = True
-    while changed:
-        changed = False
-        used = [False] * len(chains)
-        next_chains: list[list[tuple]] = []
-
-        for i in range(len(chains)):
-            if used[i]:
-                continue
-            chain = chains[i]
-            for j in range(len(chains)):
-                if i == j or used[j]:
-                    continue
-                other = chains[j]
-                if _dist(chain[-1], other[0]) < tol:
-                    chain = chain + other[1:]
-                    used[j] = True
-                    changed = True
-                elif _dist(other[-1], chain[0]) < tol:
-                    chain = other + chain[1:]
-                    used[j] = True
-                    changed = True
-                elif _dist(chain[-1], other[-1]) < tol:
-                    chain = chain + list(reversed(other))[1:]
-                    used[j] = True
-                    changed = True
-                elif _dist(chain[0], other[0]) < tol:
-                    chain = list(reversed(other)) + chain[1:]
-                    used[j] = True
-                    changed = True
-            next_chains.append(chain)
-            chains[i] = chain  # update in-place for next inner-loop iterations
-
-        chains = [c for i, c in enumerate(next_chains) if not used[i] or True]
-        # rebuild from scratch to avoid index confusion
-        chains = []
-        used2 = [False] * len(next_chains)
-        for i in range(len(next_chains)):
-            chains.append(next_chains[i])
-        # actual rebuild: keep only non-consumed entries
-        # (used[] marks entries consumed AS SOURCE, not as target)
-        # Simpler: just reset and rebuild
-        break  # exit and let outer while loop re-run if changed
-
-    # Final rebuild after all merges
-    # Re-run until stable
     stable = False
     while not stable:
         stable = True
