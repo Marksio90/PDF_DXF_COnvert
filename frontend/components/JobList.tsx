@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { fetchJobs, fetchJob, Job } from "@/lib/api";
 import JobCard from "./JobCard";
 
@@ -8,35 +8,42 @@ interface Props {
   newJob: Job | null;
 }
 
+const IN_PROGRESS = new Set(["queued", "analyzing", "converting"]);
+
 export default function JobList({ newJob }: Props) {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
+  // Ref zawsze aktualny — rozwiązuje stale closure w setInterval
+  const jobsRef = useRef<Job[]>([]);
 
   const loadJobs = useCallback(async () => {
     try {
       const data = await fetchJobs();
       setJobs(data);
+      jobsRef.current = data;
     } catch {
-      // silently fail on poll
+      // ignorujemy błędy przy pollingowych odczytach
     } finally {
       setLoading(false);
     }
   }, []);
 
-  // Add new job optimistically
+  // Dodaj nowy job optimistycznie
   useEffect(() => {
     if (newJob) {
-      setJobs((prev) => [newJob, ...prev.filter((j) => j.id !== newJob.id)]);
+      setJobs((prev) => {
+        const updated = [newJob, ...prev.filter((j) => j.id !== newJob.id)];
+        jobsRef.current = updated;
+        return updated;
+      });
     }
   }, [newJob]);
 
-  // Poll for status updates of in-progress jobs
+  // Inicjalne załadowanie + stały polling co 2 s
   useEffect(() => {
     loadJobs();
     const interval = setInterval(async () => {
-      const processing = jobs.filter(
-        (j) => j.status === "queued" || j.status === "analyzing" || j.status === "converting"
-      );
+      const processing = jobsRef.current.filter((j) => IN_PROGRESS.has(j.status));
       if (processing.length === 0) return;
 
       const updates = await Promise.allSettled(processing.map((j) => fetchJob(j.id)));
@@ -45,27 +52,38 @@ export default function JobList({ newJob }: Props) {
         updates.forEach((r) => {
           if (r.status === "fulfilled") map.set(r.value.id, r.value);
         });
-        return Array.from(map.values()).sort(
+        const sorted = Array.from(map.values()).sort(
           (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
         );
+        jobsRef.current = sorted;
+        return sorted;
       });
     }, 2000);
     return () => clearInterval(interval);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jobs.length]);
+  }, [loadJobs]);
 
-  const handleDelete = (id: string) => setJobs((prev) => prev.filter((j) => j.id !== id));
+  const handleDelete = (id: string) =>
+    setJobs((prev) => {
+      const updated = prev.filter((j) => j.id !== id);
+      jobsRef.current = updated;
+      return updated;
+    });
+
   const handleUpdate = (job: Job) =>
-    setJobs((prev) => prev.map((j) => (j.id === job.id ? job : j)));
+    setJobs((prev) => {
+      const updated = prev.map((j) => (j.id === job.id ? job : j));
+      jobsRef.current = updated;
+      return updated;
+    });
 
   if (loading) {
-    return <p className="text-gray-500 text-sm text-center py-8">Loading jobs…</p>;
+    return <p className="text-gray-500 text-sm text-center py-8">Ładowanie zadań…</p>;
   }
 
   if (jobs.length === 0) {
     return (
       <p className="text-gray-600 text-sm text-center py-8">
-        No conversion jobs yet. Upload a PDF above.
+        Brak zadań. Wgraj plik PDF powyżej.
       </p>
     );
   }
