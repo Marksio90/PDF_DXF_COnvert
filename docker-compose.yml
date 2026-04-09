@@ -19,10 +19,11 @@ services:
       - DB_PATH=/data/jobs.db
       - CORS_ORIGINS=["http://localhost:3000","http://frontend:3000"]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)"]
+      interval: 15s
       timeout: 10s
-      retries: 3
+      retries: 5
+      start_period: 10s
 
   frontend:
     build:
