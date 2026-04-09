@@ -66,7 +66,7 @@ def detect_scale(
 ) -> ScaleResult:
     result = ScaleResult()
 
-    # 1. User-forced
+    # 1. User-forced (najwyższy priorytet)
     if forced_unit:
         result.source = "forced"
         result.status = "verified"
@@ -74,19 +74,7 @@ def detect_scale(
         result.notes.append(f"Jednostka wymuszona przez użytkownika: {forced_unit}")
         return result
 
-    # 2. Dimension-text correlation (most reliable for CAD PDFs)
-    if raw_segments:
-        dim_sf, dim_note = _detect_from_dimensions(text_blocks, raw_segments)
-        if dim_sf is not None:
-            result.scale_factor    = dim_sf
-            result.unit            = "mm"
-            result.status          = "verified"
-            result.source          = "dimension"
-            result.confidence_delta = 0
-            result.notes.append(dim_note)
-            return result
-
-    # 3. PDF UserUnit metadata
+    # 2. PDF UserUnit metadata
     if pdf_path:
         uu_sf = _detect_userunit(pdf_path, page_idx)
         if uu_sf is not None:
@@ -96,12 +84,10 @@ def detect_scale(
             result.source          = "userunit"
             result.confidence_delta = -settings.SCALE_CONFIDENCE_PENALTY_ASSUMED
             result.notes.append(
-                f"Wykryto UserUnit w PDF: scale_factor={uu_sf:.6f} (≈ {'mm' if abs(uu_sf-1.0)<0.05 else 'pt→mm'})"
+                f"Wykryto UserUnit w PDF: scale_factor={uu_sf:.6f}"
             )
-            # fall through to also check text for ratio
-            # (don't return yet — might find ratio in text)
 
-    # 4. Text-based detection
+    # 3. Text-based detection (jednostka + skala z tekstu PDF)
     all_text = " ".join(b["text"] for b in text_blocks)
     text_unit  = _detect_unit(all_text)
     text_ratio = _detect_ratio(all_text)
@@ -138,9 +124,9 @@ def detect_scale(
             )
         return result
 
-    # 5. Default
+    # 4. Default: PT_TO_MM — poprawne dla standardowych PDF z CAD (1pt = 1/72 cala)
     if result.source == "userunit":
-        return result  # keep userunit result
+        return result  # zachowaj wynik userunit
 
     result.status          = "unverified"
     result.source          = "default"
