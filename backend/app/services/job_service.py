@@ -90,7 +90,13 @@ def _run(db: Session, job: Job, forced_unit: str | None):
         return
 
     # --- Step 3: Detect scale ---
-    scale_result = detect_scale(text_blocks, forced_unit=forced_unit)
+    scale_result = detect_scale(
+        text_blocks,
+        raw_segments=raw_segments,
+        forced_unit=forced_unit,
+        pdf_path=job.pdf_path,
+        page_idx=0,
+    )
 
     # --- Step 4: Optimise geometry ---
     # Join tolerance in PDF points (0.5 pt ≈ 0.18 mm at 1:1 scale)

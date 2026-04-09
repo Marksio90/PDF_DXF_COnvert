@@ -11,10 +11,11 @@ interface Props {
 }
 
 const UNIT_OPTIONS = [
-  { value: "", label: "Auto" },
-  { value: "mm", label: "mm" },
-  { value: "inch", label: "inch" },
-  { value: "cm", label: "cm" },
+  { value: "",          label: "Auto" },
+  { value: "mm",        label: "mm (pt→mm)" },
+  { value: "mm_direct", label: "mm natywne" },
+  { value: "inch",      label: "inch" },
+  { value: "cm",        label: "cm" },
 ];
 
 const STATUS_COLORS: Record<string, string> = {
@@ -168,7 +169,12 @@ export default function JobCard({ job, onDelete, onUpdate }: Props) {
 
           {/* QA report */}
           {job.qa_report && (
-            <QualityReport report={job.qa_report} scaleStatus={job.scale_status} />
+            <QualityReport
+              report={job.qa_report}
+              scaleStatus={job.scale_status}
+              scaleFactor={job.scale_factor}
+              scaleSource={job.unit_source}
+            />
           )}
         </div>
       )}
