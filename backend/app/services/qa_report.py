@@ -65,15 +65,10 @@ def build_report(
             "PDF contains both vector and raster content. Some elements may be missing."
         )
 
-    # Scale warnings
-    if scale_status == "unverified":
+    # Scale warnings — tylko gdy faktycznie niepewna
+    if scale_status == "assumed":
         report.warnings.append(
-            "Scale could not be determined. DXF dimensions may not be correct. "
-            "Use the 'Force unit' option and re-convert."
-        )
-    elif scale_status == "assumed":
-        report.warnings.append(
-            "Scale was partially detected. Verify dimensions in your CAD software."
+            "Skala wykryta z tekstu PDF. Sprawdź wymiary w programie CAD."
         )
 
     # Geometry warnings
