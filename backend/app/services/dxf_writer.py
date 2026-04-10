@@ -8,6 +8,7 @@ Key responsibilities:
   • Layer assignment: GEOMETRY, FRAME, TEXT, DIMENSIONS_HINTS
 """
 from __future__ import annotations
+import math
 import ezdxf
 from ezdxf.enums import TextEntityAlignment
 
@@ -77,6 +78,46 @@ def write_dxf(
             msp.add_circle(
                 (tx, ty),
                 radius=r * sf,
+                dxfattribs={"layer": layer},
+            )
+            counts[layer] += 1
+
+        elif obj_type == "arc":
+            # Konwertuj łuk z przestrzeni PDF do DXF (Y-flip + scale)
+            cx, cy = obj["center"]
+            r       = obj["radius"]
+            p_start = obj["p_start"]
+            p_end   = obj["p_end"]
+            p_mid   = obj["p_mid"]
+
+            tcx, tcy = _transform((cx, cy), ph, sf)
+            tsx, tsy = _transform(p_start, ph, sf)
+            tex, tey = _transform(p_end,   ph, sf)
+            tmx, tmy = _transform(p_mid,   ph, sf)
+            tr = r * sf
+
+            # Kąty w przestrzeni DXF (po Y-flip)
+            sa  = math.degrees(math.atan2(tsy - tcy, tsx - tcx)) % 360
+            ea  = math.degrees(math.atan2(tey - tcy, tex - tcx)) % 360
+            ma  = math.degrees(math.atan2(tmy - tcy, tmx - tcx)) % 360
+
+            # Sprawdź czy łuk biegnie CCW (standard DXF).
+            # Jeśli punkt środkowy łuku nie leży na łuku CCW sa→ea, zamień kierunek.
+            def _between_ccw(s: float, m: float, e: float) -> bool:
+                if abs(s - e) < 1e-6:
+                    return True
+                if s < e:
+                    return s <= m <= e
+                return m >= s or m <= e
+
+            if not _between_ccw(sa, ma, ea):
+                sa, ea = ea, sa   # odwróć → CCW
+
+            msp.add_arc(
+                (tcx, tcy),
+                radius=tr,
+                start_angle=sa,
+                end_angle=ea,
                 dxfattribs={"layer": layer},
             )
             counts[layer] += 1
