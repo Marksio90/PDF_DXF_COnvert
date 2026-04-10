@@ -1,27 +1,17 @@
 """
-Geometry Optimizer — drawing-aware pipeline
+Geometry Optimizer — drawing-aware pipeline (v3)
 
-Każde PDF drawing (jedna ścieżka PDF) przetwarzane jako ONE connected unit:
+Zasada działania:
+  1. Każde PDF drawing (jedna ścieżka/path) = jeden lub więcej spójnych łańcuchów.
+     Segmenty w obrębie drawing są w kolejności i połączone → budujemy łańcuch
+     bezpośrednio bez łączenia (garantowana spójność).
+  2. Jeśli drawing zawiera wiele podścieżek (nieciągłych) → wiele łańcuchów.
+  3. Między drawings: tylko korekta błędów float (≤ 2 pt).
+     NIE łączymy agresywnie — to tworzy fałszywe połączenia między konturami!
+  4. Tylko 4 czyste Béziery → CIRCLE | 1 czysty Bézier → ARC
+     Wszystko inne → LWPOLYLINE (Béziery tessellowane 64 krokami).
 
-  Per-drawing logic:
-    • Tylko 4 krzywe Béziera → CIRCLE (kappa test)
-    • Tylko 1 krzywa Béziera → ARC (circumcircle fit)
-    • Wszystko inne (linie + krzywe + rect) → jeden LWPOLYLINE
-      (krzywe tessellowane 64 krokami → gładkie, spójne z sąsiednimi liniami)
-
-  Między rysunkami:
-    • Loose join ≤ NODE_JOIN_LOOSE_PT (domyślnie 15 pt ≈ 5 mm)
-      łączy ścieżki których końce PDF eksporter rozłączył
-
-  Post-processing:
-    • Zamknięta polilinia ≥ 6 pkt → CIRCLE (fallback)
-    • Duży bbox → FRAME
-
-Wynik:
-  { "type": "circle",   "center": (x,y), "radius": r,    "is_frame": False }
-  { "type": "arc",      "center": (x,y), "radius": r,
-                         "p_start":(x,y), "p_end":(x,y), "p_mid":(x,y) }
-  { "type": "polyline", "points": [...],  "closed": bool, "is_frame": bool  }
+Nie używamy dużych tolerancji łączenia — niszczą rysunek.
 """
 from __future__ import annotations
 import math
@@ -37,15 +27,13 @@ def _dist(a: tuple, b: tuple) -> float:
     return math.hypot(a[0] - b[0], a[1] - b[1])
 
 
-def _circumcircle(p1: tuple, p2: tuple, p3: tuple) -> tuple[bool, float, float, float]:
-    ax, ay = p1
-    bx, by = p2
-    cx_, cy_ = p3
-    D = 2.0 * (ax * (by - cy_) + bx * (cy_ - ay) + cx_ * (ay - by))
+def _circumcircle(p1, p2, p3):
+    ax, ay = p1; bx, by = p2; cx_, cy_ = p3
+    D = 2.0*(ax*(by-cy_)+bx*(cy_-ay)+cx_*(ay-by))
     if abs(D) < 1e-10:
         return False, 0.0, 0.0, 0.0
-    ux = ((ax**2+ay**2)*(by-cy_) + (bx**2+by**2)*(cy_-ay) + (cx_**2+cy_**2)*(ay-by)) / D
-    uy = ((ax**2+ay**2)*(cx_-bx) + (bx**2+by**2)*(ax-cx_) + (cx_**2+cy_**2)*(bx-ax)) / D
+    ux = ((ax**2+ay**2)*(by-cy_)+(bx**2+by**2)*(cy_-ay)+(cx_**2+cy_**2)*(ay-by)) / D
+    uy = ((ax**2+ay**2)*(cx_-bx)+(bx**2+by**2)*(ax-cx_)+(cx_**2+cy_**2)*(bx-ax)) / D
     return True, ux, uy, math.hypot(ax-ux, ay-uy)
 
 
@@ -53,7 +41,7 @@ def _circumcircle(p1: tuple, p2: tuple, p3: tuple) -> tuple[bool, float, float, 
 # Bézier → CIRCLE  (4 krzywe kappa)
 # ---------------------------------------------------------------------------
 
-def _bezier_is_quarter_arc(p0, p1, p2, p3) -> tuple[bool, float, float, float]:
+def _bezier_is_quarter_arc(p0, p1, p2, p3):
     chord = _dist(p0, p3)
     if chord < 1e-6:
         return False, 0.0, 0.0, 0.0
@@ -61,48 +49,40 @@ def _bezier_is_quarter_arc(p0, p1, p2, p3) -> tuple[bool, float, float, float]:
     tol   = settings.CIRCLE_KAPPA_TOLERANCE
     r_c   = chord / math.sqrt(2)
     exp   = kappa * r_c
-    if abs(_dist(p0, p1) - exp) / max(exp, 1e-6) > tol:
-        return False, 0.0, 0.0, 0.0
-    if abs(_dist(p2, p3) - exp) / max(exp, 1e-6) > tol:
-        return False, 0.0, 0.0, 0.0
-    mx = (p0[0]+p3[0])/2; my = (p0[1]+p3[1])/2
-    dx = p3[0]-p0[0];     dy = p3[1]-p0[1]
-    pl = math.hypot(dx, dy)
-    if pl < 1e-9:
-        return False, 0.0, 0.0, 0.0
-    px = -dy/pl; py = dx/pl
-    h  = math.sqrt(max(r_c**2 - (chord/2)**2, 0))
-    for sign in (1, -1):
-        cx = mx + sign*h*px
-        cy = my + sign*h*py
-        if abs(_dist((cx, cy), p0) - r_c) / max(r_c, 1e-6) < tol*2:
+    if abs(_dist(p0,p1)-exp)/max(exp,1e-6) > tol: return False, 0.0, 0.0, 0.0
+    if abs(_dist(p2,p3)-exp)/max(exp,1e-6) > tol: return False, 0.0, 0.0, 0.0
+    mx=(p0[0]+p3[0])/2; my=(p0[1]+p3[1])/2
+    dx=p3[0]-p0[0];     dy=p3[1]-p0[1]
+    pl=math.hypot(dx,dy)
+    if pl < 1e-9: return False, 0.0, 0.0, 0.0
+    px=-dy/pl; py=dx/pl
+    h=math.sqrt(max(r_c**2-(chord/2)**2, 0))
+    for sign in (1,-1):
+        cx=mx+sign*h*px; cy=my+sign*h*py
+        if abs(_dist((cx,cy),p0)-r_c)/max(r_c,1e-6) < tol*2:
             return True, cx, cy, r_c
     return False, 0.0, 0.0, 0.0
 
 
-def _curves_form_circle(curves: list[dict]) -> tuple[bool, float, float, float]:
+def _curves_form_circle(curves):
     if len(curves) != 4:
         return False, 0.0, 0.0, 0.0
     centres, radii = [], []
     for seg in curves:
         pts = seg["points"]
-        ok, cx, cy, r = _bezier_is_quarter_arc(pts[0], pts[1], pts[2], pts[3])
-        if not ok:
-            return False, 0.0, 0.0, 0.0
-        centres.append((cx, cy)); radii.append(r)
-    avg_cx = sum(c[0] for c in centres) / 4
-    avg_cy = sum(c[1] for c in centres) / 4
-    avg_r  = sum(radii) / 4
-    kt = settings.CIRCLE_KAPPA_TOLERANCE * 4
-    for cx, cy in centres:
-        if _dist((cx, cy), (avg_cx, avg_cy)) > avg_r * kt:
-            return False, 0.0, 0.0, 0.0
+        ok, cx, cy, r = _bezier_is_quarter_arc(pts[0],pts[1],pts[2],pts[3])
+        if not ok: return False, 0.0, 0.0, 0.0
+        centres.append((cx,cy)); radii.append(r)
+    avg_cx=sum(c[0] for c in centres)/4
+    avg_cy=sum(c[1] for c in centres)/4
+    avg_r =sum(radii)/4
+    kt=settings.CIRCLE_KAPPA_TOLERANCE*4
+    for cx,cy in centres:
+        if _dist((cx,cy),(avg_cx,avg_cy))>avg_r*kt: return False, 0.0, 0.0, 0.0
     for r in radii:
-        if abs(r - avg_r) / max(avg_r, 1e-6) > kt:
-            return False, 0.0, 0.0, 0.0
-    if avg_r < settings.MIN_CIRCLE_RADIUS_PT:
-        return False, 0.0, 0.0, 0.0
-    if _dist(curves[0]["points"][0], curves[3]["points"][3]) > avg_r * 0.05:
+        if abs(r-avg_r)/max(avg_r,1e-6)>kt: return False, 0.0, 0.0, 0.0
+    if avg_r < settings.MIN_CIRCLE_RADIUS_PT: return False, 0.0, 0.0, 0.0
+    if _dist(curves[0]["points"][0], curves[3]["points"][3]) > avg_r*0.05:
         return False, 0.0, 0.0, 0.0
     return True, avg_cx, avg_cy, avg_r
 
@@ -111,22 +91,19 @@ def _curves_form_circle(curves: list[dict]) -> tuple[bool, float, float, float]:
 # Bézier → ARC  (pojedyncza krzywa)
 # ---------------------------------------------------------------------------
 
-def _bezier_to_arc(p0, p1, p2, p3, tol_pt: float = 2.0):
+def _bezier_to_arc(p0, p1, p2, p3, tol_pt=2.0):
     def _bpt(t):
-        mt = 1.0 - t
+        mt=1-t
         return (mt**3*p0[0]+3*mt**2*t*p1[0]+3*mt*t**2*p2[0]+t**3*p3[0],
                 mt**3*p0[1]+3*mt**2*t*p1[1]+3*mt*t**2*p2[1]+t**3*p3[1])
-    if _dist(p0, p3) < 1e-6:
-        return False, 0.0, 0.0, 0.0, None
-    p_mid = _bpt(0.5)
-    ok, cx, cy, r = _circumcircle(p0, p_mid, p3)
-    if not ok or r < settings.MIN_CIRCLE_RADIUS_PT:
-        return False, 0.0, 0.0, 0.0, None
-    rel_tol = max(tol_pt, r * 0.03)
-    for t in (0.15, 0.3, 0.5, 0.7, 0.85):
-        if abs(_dist((cx, cy), _bpt(t)) - r) > rel_tol:
-            return False, 0.0, 0.0, 0.0, None
-    return True, cx, cy, r, p_mid
+    if _dist(p0,p3)<1e-6: return False,0.0,0.0,0.0,None
+    p_mid=_bpt(0.5)
+    ok,cx,cy,r=_circumcircle(p0,p_mid,p3)
+    if not ok or r<settings.MIN_CIRCLE_RADIUS_PT: return False,0.0,0.0,0.0,None
+    rel_tol=max(tol_pt, r*0.03)
+    for t in (0.15,0.3,0.5,0.7,0.85):
+        if abs(_dist((cx,cy),_bpt(t))-r)>rel_tol: return False,0.0,0.0,0.0,None
+    return True,cx,cy,r,p_mid
 
 
 # ---------------------------------------------------------------------------
@@ -134,72 +111,71 @@ def _bezier_to_arc(p0, p1, p2, p3, tol_pt: float = 2.0):
 # ---------------------------------------------------------------------------
 
 def _fit_circle_from_polyline(points, radius_cv_tol=0.03, max_angular_gap=4.0):
-    pts = list(points)
-    if len(pts) > 1 and _dist(pts[0], pts[-1]) < 1.0:
-        pts = pts[:-1]
-    n = len(pts)
-    if n < 6:
-        return False, 0.0, 0.0, 0.0
-    cx = sum(p[0] for p in pts) / n
-    cy = sum(p[1] for p in pts) / n
-    dists = [_dist((cx, cy), p) for p in pts]
-    mean_r = sum(dists) / n
-    if mean_r < settings.MIN_CIRCLE_RADIUS_PT:
-        return False, 0.0, 0.0, 0.0
-    cv = math.sqrt(sum((d - mean_r)**2 for d in dists) / n) / mean_r
-    if cv > radius_cv_tol:
-        return False, 0.0, 0.0, 0.0
-    angles = sorted(math.atan2(p[1]-cy, p[0]-cx) for p in pts)
-    gaps = [angles[i+1]-angles[i] for i in range(len(angles)-1)]
-    gaps.append(angles[0] + 2*math.pi - angles[-1])
-    if max(gaps) > (2*math.pi / n) * max_angular_gap:
-        return False, 0.0, 0.0, 0.0
-    return True, cx, cy, mean_r
+    pts=list(points)
+    if len(pts)>1 and _dist(pts[0],pts[-1])<1.0:
+        pts=pts[:-1]
+    n=len(pts)
+    if n<6: return False,0.0,0.0,0.0
+    cx=sum(p[0] for p in pts)/n; cy=sum(p[1] for p in pts)/n
+    dists=[_dist((cx,cy),p) for p in pts]
+    mean_r=sum(dists)/n
+    if mean_r<settings.MIN_CIRCLE_RADIUS_PT: return False,0.0,0.0,0.0
+    cv=math.sqrt(sum((d-mean_r)**2 for d in dists)/n)/mean_r
+    if cv>radius_cv_tol: return False,0.0,0.0,0.0
+    angles=sorted(math.atan2(p[1]-cy,p[0]-cx) for p in pts)
+    gaps=[angles[i+1]-angles[i] for i in range(len(angles)-1)]
+    gaps.append(angles[0]+2*math.pi-angles[-1])
+    if max(gaps)>(2*math.pi/n)*max_angular_gap: return False,0.0,0.0,0.0
+    return True,cx,cy,mean_r
 
 
 # ---------------------------------------------------------------------------
 # Frame detection
 # ---------------------------------------------------------------------------
 
-def _is_frame(pts: list[tuple], page_width: float, page_height: float) -> bool:
-    if len(pts) < 4:
-        return False
-    xs = [p[0] for p in pts]; ys = [p[1] for p in pts]
-    ratio = settings.FRAME_BBOX_RATIO
-    return (max(xs)-min(xs) >= page_width*ratio and
-            max(ys)-min(ys) >= page_height*ratio)
+def _is_frame(pts, page_width, page_height):
+    if len(pts)<4: return False
+    xs=[p[0] for p in pts]; ys=[p[1] for p in pts]
+    ratio=settings.FRAME_BBOX_RATIO
+    return (max(xs)-min(xs)>=page_width*ratio and
+            max(ys)-min(ys)>=page_height*ratio)
 
 
 # ---------------------------------------------------------------------------
 # Bézier tessellation
 # ---------------------------------------------------------------------------
 
-def _tessellate_bezier(seg: dict, steps: int = 64) -> list[tuple]:
-    p0, p1, p2, p3 = [seg["points"][i] for i in range(4)]
-    pts = []
-    for i in range(steps + 1):
-        t = i / steps; mt = 1 - t
+def _tessellate_bezier(seg, steps=64):
+    p0,p1,p2,p3=[seg["points"][i] for i in range(4)]
+    pts=[]
+    for i in range(steps+1):
+        t=i/steps; mt=1-t
         pts.append((
-            mt**3*p0[0] + 3*mt**2*t*p1[0] + 3*mt*t**2*p2[0] + t**3*p3[0],
-            mt**3*p0[1] + 3*mt**2*t*p1[1] + 3*mt*t**2*p2[1] + t**3*p3[1],
+            mt**3*p0[0]+3*mt**2*t*p1[0]+3*mt*t**2*p2[0]+t**3*p3[0],
+            mt**3*p0[1]+3*mt**2*t*p1[1]+3*mt*t**2*p2[1]+t**3*p3[1],
         ))
     return pts
 
 
 # ---------------------------------------------------------------------------
-# Build one connected chain from a drawing's ordered segments
+# Build chains from a drawing's segments
+# Handles disconnected subpaths within one drawing.
+# Within a well-formed PDF path, endpoints are EXACT — _EXACT_MATCH_TOL
+# handles rounding in float conversion only.
 # ---------------------------------------------------------------------------
 
-_EXACT_MATCH_TOL = 0.5  # pt — within a PDF path, endpoints are exact
+_EXACT_MATCH_TOL = 0.5   # pt — within one PDF path, endpoints should be identical
 
 
-def _build_chain(segs: list[dict]) -> list[tuple]:
+def _build_chains(segs: list[dict]) -> list[list[tuple]]:
     """
-    Concatenate all segments from ONE drawing into a single point list.
-    Within a PDF path, consecutive segment endpoints are identical, so we
-    skip the duplicate shared point when appending.
+    Convert ordered drawing segments into connected point chains.
+    If a segment doesn't connect to the current chain (disconnected subpath),
+    a new chain is started — NOT joined across the gap.
     """
-    chain: list[tuple] = []
+    chains: list[list[tuple]] = []
+    current: list[tuple] = []
+
     for seg in segs:
         t = seg["type"]
         if t in ("line", "rect", "quad"):
@@ -209,14 +185,20 @@ def _build_chain(segs: list[dict]) -> list[tuple]:
         else:
             continue
 
-        if not chain:
-            chain.extend(pts)
-        elif _dist(chain[-1], pts[0]) <= _EXACT_MATCH_TOL:
-            chain.extend(pts[1:])   # skip shared endpoint
+        if not current:
+            current = list(pts)
+        elif _dist(current[-1], pts[0]) <= _EXACT_MATCH_TOL:
+            current.extend(pts[1:])      # connected — merge (skip duplicate endpoint)
         else:
-            chain.extend(pts)       # unexpected gap inside drawing — append anyway
+            # Disconnected subpath: save current, start new
+            if len(current) >= 2:
+                chains.append(current)
+            current = list(pts)
 
-    return chain
+    if len(current) >= 2:
+        chains.append(current)
+
+    return chains
 
 
 # ---------------------------------------------------------------------------
@@ -225,17 +207,16 @@ def _build_chain(segs: list[dict]) -> list[tuple]:
 
 def _process_drawing(segs: list[dict], page_w: float, page_h: float) -> list[dict]:
     """
-    Convert one PDF drawing (connected path) into DXF entities.
+    Convert one PDF drawing (path) into DXF entities.
 
-    Rules:
-      • Exactly 4 Béziers, no lines → try CIRCLE
-      • Exactly 1 Bézier, no lines  → try ARC
-      • Everything else              → one LWPOLYLINE (Béziers tessellated)
+      4 pure Béziers            → try CIRCLE
+      1 pure Bézier             → try ARC
+      everything else           → LWPOLYLINE(s) with tessellated curves
     """
     curves     = [s for s in segs if s["type"] == "curve"]
     non_curves = [s for s in segs if s["type"] != "curve"]
 
-    # ── Pure-Bézier drawings: circle / arc detection ───────────────────────
+    # ── Pure-Bézier cases ──────────────────────────────────────────────────
     if curves and not non_curves:
         if len(curves) == 4:
             ok, cx, cy, r = _curves_form_circle(curves)
@@ -251,21 +232,22 @@ def _process_drawing(segs: list[dict], page_w: float, page_h: float) -> list[dic
                          "p_start": pts[0], "p_end": pts[3],
                          "p_mid": pm, "is_frame": False}]
 
-    # ── Mixed or multi-curve: build one connected polyline ─────────────────
-    chain = _build_chain(segs)
-    if len(chain) < 2:
-        return []
-    closed   = _dist(chain[0], chain[-1]) < 1.0
-    is_frame = _is_frame(chain, page_w, page_h)
-    return [{"type": "polyline", "points": chain,
-             "closed": closed, "is_frame": is_frame}]
+    # ── Build chain(s) from ordered segments ──────────────────────────────
+    result = []
+    for chain in _build_chains(segs):
+        closed   = _dist(chain[0], chain[-1]) < 1.0
+        is_frame = _is_frame(chain, page_w, page_h)
+        result.append({"type": "polyline", "points": chain,
+                        "closed": closed, "is_frame": is_frame})
+    return result
 
 
 # ---------------------------------------------------------------------------
-# Between-drawing loose join
+# Float-error join between drawings (TIGHT tolerance only)
 # ---------------------------------------------------------------------------
 
 def _join_pass(chains: list[list[tuple]], tol: float) -> list[list[tuple]]:
+    """Merge chains whose endpoints are within `tol` points."""
     stable = False
     while not stable:
         stable = True
@@ -280,13 +262,13 @@ def _join_pass(chains: list[list[tuple]], tol: float) -> list[list[tuple]]:
                     continue
                 other = chains[j]
                 if _dist(chain[-1], other[0]) < tol:
-                    chain = chain + other[1:];             used[j] = True; stable = False
+                    chain = chain + other[1:];                used[j]=True; stable=False
                 elif _dist(other[-1], chain[0]) < tol:
-                    chain = other + chain[1:];             used[j] = True; stable = False
+                    chain = other + chain[1:];                used[j]=True; stable=False
                 elif _dist(chain[-1], other[-1]) < tol:
-                    chain = chain + list(reversed(other))[1:]; used[j] = True; stable = False
+                    chain = chain + list(reversed(other))[1:]; used[j]=True; stable=False
                 elif _dist(chain[0], other[0]) < tol:
-                    chain = list(reversed(other)) + chain[1:]; used[j] = True; stable = False
+                    chain = list(reversed(other)) + chain[1:]; used[j]=True; stable=False
             new_chains.append(chain)
         chains = new_chains
     return chains
@@ -297,22 +279,25 @@ def _join_pass(chains: list[list[tuple]], tol: float) -> list[list[tuple]]:
 # ---------------------------------------------------------------------------
 
 def optimize_geometry(
-    raw_segments: list[dict],
-    page_width:   float,
-    page_height:  float,
-    join_tolerance_pt: float = 1.0,   # kept for API compatibility, used as min for loose join
+    raw_segments:      list[dict],
+    page_width:        float,
+    page_height:       float,
+    join_tolerance_pt: float = 1.0,   # kept for API compat (used as float-error tol)
 ) -> list[dict]:
-    # ── Group segments by drawing_id ─────────────────────────────────────
+    """
+    Convert raw PDF segments into optimised DXF entity list.
+    """
+    # ── Group by drawing_id (one PDF path = one group) ────────────────────
     by_drawing: dict[int, list[dict]] = defaultdict(list)
     for seg in raw_segments:
         by_drawing[seg.get("drawing_id", 0)].append(seg)
 
-    circles:     list[dict] = []
-    arcs_out:    list[dict] = []
-    frames_out:  list[dict] = []
-    poly_chains: list[list[tuple]] = []   # for loose joining
+    circles:    list[dict]       = []
+    arcs_out:   list[dict]       = []
+    frames_out: list[dict]       = []
+    poly_chains: list[list[tuple]] = []
 
-    # ── Process each drawing as one unit ─────────────────────────────────
+    # ── Process each drawing independently ───────────────────────────────
     for did in sorted(by_drawing):
         for entity in _process_drawing(by_drawing[did], page_width, page_height):
             etype = entity["type"]
@@ -320,23 +305,25 @@ def optimize_geometry(
                 circles.append(entity)
             elif etype == "arc":
                 arcs_out.append(entity)
-            else:  # polyline
-                if entity.get("is_frame"):
-                    frames_out.append(entity)
-                else:
-                    poly_chains.append(entity["points"])
+            elif entity.get("is_frame"):
+                frames_out.append(entity)
+            else:
+                poly_chains.append(entity["points"])
 
-    # ── Loose join between drawings ───────────────────────────────────────
-    loose_tol = max(join_tolerance_pt * 10, settings.NODE_JOIN_LOOSE_PT)
-    joined = _join_pass(poly_chains, loose_tol)
+    # ── Tight float-error join between drawings: 2 pt max ────────────────
+    # Purpose: fix genuine export float rounding only.
+    # We intentionally do NOT use a large tolerance — that would merge
+    # separate contours (dimension lines, slots, holes) into one path.
+    float_tol = min(join_tolerance_pt, 2.0)
+    joined = _join_pass(poly_chains, float_tol)
 
-    # ── Assemble result ───────────────────────────────────────────────────
+    # ── Assemble final result ─────────────────────────────────────────────
     result: list[dict] = list(circles) + list(arcs_out) + list(frames_out)
 
     for chain in joined:
         if len(chain) < 2:
             continue
-        closed   = _dist(chain[0], chain[-1]) < loose_tol * 2
+        closed   = _dist(chain[0], chain[-1]) < float_tol * 2
         is_frame = _is_frame(chain, page_width, page_height)
 
         if is_frame:
