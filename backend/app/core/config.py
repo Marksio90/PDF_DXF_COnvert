@@ -10,7 +10,8 @@ class Settings(BaseSettings):
     DB_PATH: Path = Path("/data/jobs.db")
 
     # Geometry tolerances
-    NODE_JOIN_TOLERANCE_MM: float = 0.1       # max gap to join path segments
+    NODE_JOIN_TOLERANCE_MM: float = 0.1       # legacy, kept for compat
+    NODE_JOIN_LOOSE_PT: float = 15.0          # loose join between PDF paths (≈5 mm)
     CIRCLE_KAPPA: float = 0.5522847498        # Bézier circle approximation constant
     CIRCLE_KAPPA_TOLERANCE: float = 0.02      # tolerance around kappa
     FRAME_BBOX_RATIO: float = 0.92            # BBox > 92% of page = frame
