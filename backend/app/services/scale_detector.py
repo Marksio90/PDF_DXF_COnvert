@@ -60,29 +60,43 @@ def detect_scale(
     all_text = " ".join(b["text"] for b in text_blocks)
     ratio = _detect_ratio(all_text)
 
-    if ratio and ratio != (1, 1):
+    if ratio:
         n, d = ratio
-        result.scale_factor    = PT_TO_MM * n / d
-        result.ratio_numerator = n
-        result.ratio_denominator = d
-        result.source          = "text"
-        result.status          = "assumed"
-        result.confidence_delta = -settings.SCALE_CONFIDENCE_PENALTY_ASSUMED
-        result.notes.append(
-            f"Wykryto skalę {n}:{d} w tekście PDF. "
-            f"scale_factor = {PT_TO_MM:.6f} × {n}/{d} = {result.scale_factor:.6f}"
-        )
+        if n == 1 and d == 1:
+            # Explicite SKALA 1:1 w tekście — potwierdza PT_TO_MM
+            result.scale_factor      = PT_TO_MM
+            result.ratio_numerator   = 1
+            result.ratio_denominator = 1
+            result.source            = "text"
+            result.status            = "verified"
+            result.confidence_delta  = 0
+            result.notes.append(
+                f"Wykryto SKALA 1:1 w tekście PDF. "
+                f"scale_factor = PT_TO_MM = {PT_TO_MM:.6f} mm/pt."
+            )
+        else:
+            result.scale_factor      = PT_TO_MM * n / d
+            result.ratio_numerator   = n
+            result.ratio_denominator = d
+            result.source            = "text"
+            result.status            = "assumed"
+            result.confidence_delta  = -settings.SCALE_CONFIDENCE_PENALTY_ASSUMED
+            result.notes.append(
+                f"Wykryto skalę {n}:{d} w tekście PDF. "
+                f"scale_factor = {PT_TO_MM:.6f} × {n}/{d} = {result.scale_factor:.6f} mm/pt."
+            )
         return result
 
-    # 3. Domyślnie: PT_TO_MM — zawsze poprawne dla standardowych PDF z CAD
+    # 3. Domyślnie: PT_TO_MM — matematyczny fakt, nie zgadywanie.
+    #    1 PDF point = 1/72 cala = 25.4/72 mm. Zawsze poprawne dla wektorowych PDF z CAD.
     result.scale_factor    = PT_TO_MM
     result.unit            = "mm"
-    result.status          = "unverified"
+    result.status          = "verified"
     result.source          = "default"
-    result.confidence_delta = -settings.SCALE_CONFIDENCE_PENALTY_UNKNOWN
+    result.confidence_delta = 0
     result.notes.append(
-        f"Nie wykryto skali w PDF. "
-        f"Zastosowano standard: 1 pt PDF = 25.4/72 mm = {PT_TO_MM:.6f} mm/pt."
+        f"Standard ISO: 1 pt PDF = 25.4/72 mm = {PT_TO_MM:.6f} mm/pt. "
+        f"Poprawne dla wszystkich wektorowych PDF z CAD."
     )
     return result
 

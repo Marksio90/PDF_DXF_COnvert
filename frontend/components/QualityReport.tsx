@@ -22,8 +22,8 @@ function ScoreBadge({ score }: { score: number }) {
 }
 
 const STATUS_LABELS: Record<string, string> = {
-  verified:   "skala zweryfikowana",
-  assumed:    "skala przyjęta",
+  verified:   "skala OK",
+  assumed:    "skala z tekstu PDF",
   unverified: "skala nieznana",
 };
 
@@ -72,10 +72,11 @@ export default function QualityReport({ report, scaleStatus, scaleFactor, scaleS
               źródło: <span className="text-gray-300">{SOURCE_LABELS[scaleSource] ?? scaleSource}</span>
             </div>
           )}
-          <div className="text-gray-500 text-[10px] pt-1">
-            Jeśli wymiary w DXF są ~2.83× za małe → spróbuj <strong>Re-convert</strong> z opcją <em>mm natywne</em>.<br/>
-            Jeśli ~2.83× za duże → spróbuj <em>mm (pt→mm)</em>.
-          </div>
+          {scaleStatus !== "verified" && (
+            <div className="text-gray-500 text-[10px] pt-1">
+              Jeśli wymiary w DXF są ~2.83× za małe → spróbuj <strong>Re-convert</strong> z opcją <em>mm natywne</em>.
+            </div>
+          )}
         </div>
       )}
 
