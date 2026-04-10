@@ -1,4 +1,6 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+// Empty string = relative URL. Next.js rewrites /api/* → backend (see next.config.js).
+// Works in local dev (docker-compose) and Railway without any build-time baking.
+const API_BASE = "";
 
 export interface Job {
   id: string;

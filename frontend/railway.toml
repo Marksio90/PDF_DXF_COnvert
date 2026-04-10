@@ -4,3 +4,8 @@ dockerfilePath = "Dockerfile"
 
 [deploy]
 restartPolicyType = "always"
+
+# BACKEND_URL tells Next.js where to proxy /api/* requests.
+# In Railway: set this to the backend service URL.
+# Use Railway variable reference: ${{backend.RAILWAY_PUBLIC_DOMAIN}}
+# or Railway private network: http://backend.railway.internal:8000
