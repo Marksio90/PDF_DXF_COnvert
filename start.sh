@@ -12,7 +12,7 @@ PREVIEWS_DIR=/data/previews \
 DB_PATH=/data/jobs.db \
 CORS_ORIGINS='["*"]' \
 TZ=Europe/Warsaw \
-uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+uvicorn app.main:app --host 127.0.0.1 --port 8000 &
 
 # Wait until backend is ready
 i=0
