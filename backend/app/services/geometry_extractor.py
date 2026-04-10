@@ -10,6 +10,10 @@ def extract_paths(pdf_path: str, page_idx: int = 0) -> tuple[list[dict], float, 
     """
     Returns (raw_segments, page_width_pt, page_height_pt).
 
+    Uwaga: współrzędne są zawsze w PDF user-space units (domyślnie pt = 1/72 cala).
+    Jeśli strona ma UserUnit ≠ 1, PyMuPDF automatycznie skaluje rect i rysunki,
+    więc page.rect.width i współrzędne get_drawings() są już uwzględnione.
+
     Each raw segment is a dict:
       { "type": "line"|"curve", "points": [...], "color": ..., "width": ... }
     """
